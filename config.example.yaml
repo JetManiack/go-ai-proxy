@@ -103,6 +103,9 @@ providers:
   #   token_budget:
   #     models:
   #       claude-opus-4-7: 4096
+  #   model_context_length:        # override the context window (prompt+completion, tokens)
+  #     "claude-sonnet-4-6": 200000 #   for providers that don't report max_model_len; config wins,
+  #                                 #   surfaced to clients in /v1/models
 
   # ── Local + cloud fallback ───────────────────────────────────────────────────
   # This pattern runs local first and falls back to Anthropic when the GPU is

@@ -64,10 +64,11 @@ type providerConfig struct {
 		Default int            `yaml:"default"` // max_tokens limit for any model from this provider; 0 = no limit
 		Models  map[string]int `yaml:"models"`  // per-model overrides
 	} `yaml:"token_budget"`
-	MaxConcurrent     int                 `yaml:"max_concurrent"`     // max parallel requests to this provider; 0 = unlimited
-	QueueSize         int                 `yaml:"queue_size"`         // max queued requests when at max_concurrent; 0 = unlimited
-	RequestTimeout    time.Duration       `yaml:"request_timeout"`    // streaming: max wait for first token; non-streaming: total response timeout
-	ModelCapabilities map[string][]string `yaml:"model_capabilities"` // manual capability override: model ID → ["vision", "reasoning", ...]
+	MaxConcurrent      int                 `yaml:"max_concurrent"`       // max parallel requests to this provider; 0 = unlimited
+	QueueSize          int                 `yaml:"queue_size"`           // max queued requests when at max_concurrent; 0 = unlimited
+	RequestTimeout     time.Duration       `yaml:"request_timeout"`      // streaming: max wait for first token; non-streaming: total response timeout
+	ModelCapabilities  map[string][]string `yaml:"model_capabilities"`   // manual capability override: model ID → ["vision", "reasoning", ...]
+	ModelContextLength map[string]int      `yaml:"model_context_length"` // model ID → context window tokens (override; config wins)
 
 	// TLS controls outgoing HTTPS behaviour. Currently honoured only by
 	// openai, lmstudio, and litellm providers.
@@ -188,6 +189,9 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		var regOpts []provider.RegisterOption
 		if len(pc.ModelCapabilities) > 0 {
 			regOpts = append(regOpts, provider.WithCapabilities(pc.ModelCapabilities))
+		}
+		if len(pc.ModelContextLength) > 0 {
+			regOpts = append(regOpts, provider.WithContextLengths(pc.ModelContextLength))
 		}
 		reg.Register(p, regOpts...)
 		providerCfgs[p] = pc

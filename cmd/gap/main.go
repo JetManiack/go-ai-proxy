@@ -19,10 +19,11 @@ import (
 	"github.com/JetManiack/go-ai-proxy/internal/metrics"
 	"github.com/JetManiack/go-ai-proxy/internal/provider"
 	anthropicprovider "github.com/JetManiack/go-ai-proxy/internal/provider/anthropic"
-	litellmprovider  "github.com/JetManiack/go-ai-proxy/internal/provider/litellm"
+	litellmprovider "github.com/JetManiack/go-ai-proxy/internal/provider/litellm"
+	llamacppprovider "github.com/JetManiack/go-ai-proxy/internal/provider/llamacpp"
 	lmstudioprovider "github.com/JetManiack/go-ai-proxy/internal/provider/lmstudio"
-	openaiprovider   "github.com/JetManiack/go-ai-proxy/internal/provider/openai"
-	vllmprovider     "github.com/JetManiack/go-ai-proxy/internal/provider/vllm"
+	openaiprovider "github.com/JetManiack/go-ai-proxy/internal/provider/openai"
+	vllmprovider "github.com/JetManiack/go-ai-proxy/internal/provider/vllm"
 	"github.com/JetManiack/go-ai-proxy/internal/server"
 )
 
@@ -34,9 +35,9 @@ type config struct {
 		RefreshInterval time.Duration `yaml:"refresh_interval"`
 		MaxBodyBytes    int64         `yaml:"max_request_body_bytes"` // 0 = no limit
 		ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`       // default 30s
-		AuditLog  bool `yaml:"audit_log"`  // emit audit entries via slog
-		Metrics   bool `yaml:"metrics"`    // expose /metrics in Prometheus text format
-		RateLimit *struct {
+		AuditLog        bool          `yaml:"audit_log"`              // emit audit entries via slog
+		Metrics         bool          `yaml:"metrics"`                // expose /metrics in Prometheus text format
+		RateLimit       *struct {
 			RPS        float64 `yaml:"rps"`         // sustained requests per second
 			Burst      int     `yaml:"burst"`       // max burst size
 			PerCaller  bool    `yaml:"per_caller"`  // false = global, true = per Authorization/IP
@@ -63,10 +64,10 @@ type providerConfig struct {
 		Default int            `yaml:"default"` // max_tokens limit for any model from this provider; 0 = no limit
 		Models  map[string]int `yaml:"models"`  // per-model overrides
 	} `yaml:"token_budget"`
-	MaxConcurrent      int                 `yaml:"max_concurrent"`       // max parallel requests to this provider; 0 = unlimited
-	QueueSize          int                 `yaml:"queue_size"`           // max queued requests when at max_concurrent; 0 = unlimited
-	RequestTimeout     time.Duration       `yaml:"request_timeout"`      // streaming: max wait for first token; non-streaming: total response timeout
-	ModelCapabilities  map[string][]string `yaml:"model_capabilities"`   // manual capability override: model ID → ["vision", "reasoning", ...]
+	MaxConcurrent     int                 `yaml:"max_concurrent"`     // max parallel requests to this provider; 0 = unlimited
+	QueueSize         int                 `yaml:"queue_size"`         // max queued requests when at max_concurrent; 0 = unlimited
+	RequestTimeout    time.Duration       `yaml:"request_timeout"`    // streaming: max wait for first token; non-streaming: total response timeout
+	ModelCapabilities map[string][]string `yaml:"model_capabilities"` // manual capability override: model ID → ["vision", "reasoning", ...]
 
 	// TLS controls outgoing HTTPS behaviour. Currently honoured only by
 	// openai, lmstudio, and litellm providers.
@@ -268,10 +269,10 @@ func run(ctx context.Context, cmd *cli.Command) error {
 func buildProvider(ctx context.Context, pc providerConfig) (domain.Provider, error) {
 	if pc.TLS != nil && pc.TLS.Insecure {
 		switch pc.Type {
-		case "openai", "lmstudio", "litellm", "vllm":
+		case "openai", "lmstudio", "litellm", "vllm", "llama-cpp":
 			// supported below
 		default:
-			return nil, fmt.Errorf("tls.insecure is not supported for provider type %q (only openai, lmstudio, litellm, vllm)", pc.Type)
+			return nil, fmt.Errorf("tls.insecure is not supported for provider type %q (only openai, lmstudio, litellm, vllm, llama-cpp)", pc.Type)
 		}
 	}
 	switch pc.Type {
@@ -378,8 +379,33 @@ func buildProvider(ctx context.Context, pc providerConfig) (domain.Provider, err
 		}
 		return vllmprovider.New(ctx, cfg)
 
+	case "llama-cpp":
+		if pc.BaseURL == "" {
+			return nil, fmt.Errorf("base_url is required for llama-cpp provider")
+		}
+		if len(pc.ModelCapabilities) == 0 {
+			return nil, fmt.Errorf("model_capabilities is required for llama-cpp provider — llama.cpp upstreams do not report capabilities")
+		}
+		cfg := llamacppprovider.Config{
+			Name:              pc.Name,
+			BaseURL:           pc.BaseURL,
+			Timeout:           pc.Timeout,
+			ModelCapabilities: pc.ModelCapabilities,
+		}
+		if pc.Auth != nil {
+			if key := os.ExpandEnv(pc.Auth.APIKey); key != "" {
+				cfg.APIKey = key
+			}
+		}
+		if pc.TLS != nil && pc.TLS.Insecure {
+			slog.Warn("TLS certificate verification disabled for provider — accepts any upstream cert",
+				"provider", pc.Name, "type", pc.Type, "base_url", pc.BaseURL)
+			cfg.TLSInsecure = true
+		}
+		return llamacppprovider.New(ctx, cfg)
+
 	default:
-		return nil, fmt.Errorf("unknown provider type %q (use \"openai\", \"lmstudio\", \"litellm\", \"vllm\", or \"anthropic\")", pc.Type)
+		return nil, fmt.Errorf("unknown provider type %q (use \"openai\", \"lmstudio\", \"litellm\", \"vllm\", \"llama-cpp\", or \"anthropic\")", pc.Type)
 	}
 }
 

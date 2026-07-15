@@ -74,6 +74,23 @@ providers:
   #   model_capabilities:
   #     "gemma-4-31b-it": ["vision", "reasoning", "tools"]
 
+  # ── llama.cpp (e.g. gemma-3-27b-it on a self-hosted server) ─────────────────
+  # OpenAI-compatible, but llama.cpp's response_format/json_schema path crashes
+  # the Gemma-3 sampler — only its native `grammar` (GBNF) field works reliably.
+  # The provider converts a client's OpenAI response_format json_schema into a
+  # GBNF grammar transparently; a client may also send `grammar` directly to
+  # bypass the converter (escape hatch for schemas the converter can't handle).
+  # llama.cpp /v1/models does NOT report capability info, so model_capabilities
+  # is REQUIRED — the provider refuses to start without explicit entries for
+  # every model it intends to serve.
+  # - name: llamacpp
+  #   type: llama-cpp                 # converts response_format json_schema -> GBNF grammar
+  #   base_url: "http://llama.local:8080"
+  #   # tls:
+  #   #   insecure: true              # use only with self-signed certs you control
+  #   model_capabilities:
+  #     "gemma-3-27b-it": ["structured_output"]
+
   # ── Anthropic ────────────────────────────────────────────────────────────────
   # - name: anthropic
   #   type: anthropic

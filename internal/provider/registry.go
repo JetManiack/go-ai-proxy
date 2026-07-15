@@ -15,10 +15,11 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// providerEntry pairs a provider with its optional capability overrides.
+// providerEntry pairs a provider with its optional capability and context-length overrides.
 type providerEntry struct {
-	provider            domain.Provider
-	capabilityOverrides map[string][]string // model ID → capabilities; nil = no overrides
+	provider              domain.Provider
+	capabilityOverrides   map[string][]string // model ID → capabilities; nil = no overrides
+	contextLengthOverrides map[string]int     // model ID → context window tokens; nil = none
 }
 
 // RegisterOption configures how a provider is registered.
@@ -28,6 +29,14 @@ type RegisterOption func(*providerEntry)
 // Useful for providers (e.g. LM Studio) that do not advertise capabilities in /v1/models.
 func WithCapabilities(caps map[string][]string) RegisterOption {
 	return func(e *providerEntry) { e.capabilityOverrides = caps }
+}
+
+// WithContextLengths sets manual context-window (max_model_len) overrides for
+// specific model IDs. Useful for providers that do not report max_model_len in
+// /v1/models (Anthropic, LiteLLM, LM Studio, llama.cpp). The override wins over
+// any provider-reported value.
+func WithContextLengths(lengths map[string]int) RegisterOption {
+	return func(e *providerEntry) { e.contextLengthOverrides = lengths }
 }
 
 // Registry maintains a set of registered providers and a model→provider index
@@ -118,6 +127,14 @@ func (r *Registry) refresh(ctx context.Context) {
 			for i, m := range models {
 				if caps, ok := entry.capabilityOverrides[m.ID]; ok {
 					models[i].Capabilities = caps
+				}
+			}
+		}
+		// Merge manual context-length overrides (override wins over provider-reported value).
+		if entry.contextLengthOverrides != nil {
+			for i, m := range models {
+				if n, ok := entry.contextLengthOverrides[m.ID]; ok {
+					models[i].MaxModelLen = n
 				}
 			}
 		}

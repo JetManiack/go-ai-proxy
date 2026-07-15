@@ -562,3 +562,33 @@ func TestCapabilitiesFor(t *testing.T) {
 		t.Error("absent: known=true, want false")
 	}
 }
+
+func TestWithContextLengths_ConfigWins(t *testing.T) {
+	fp := testutil.NewFakeProvider(
+		domain.Model{ID: "reported", MaxModelLen: 4096},
+		domain.Model{ID: "unreported"}, // MaxModelLen 0
+		domain.Model{ID: "untouched", MaxModelLen: 8192},
+	)
+	reg := provider.NewRegistry(time.Hour)
+	reg.Register(fp, provider.WithContextLengths(map[string]int{
+		"reported":   131072, // overrides the provider-reported 4096
+		"unreported": 32768,  // fills in where provider reported nothing
+	}))
+	if err := reg.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	byID := map[string]domain.Model{}
+	for _, m := range reg.Models() {
+		byID[m.ID] = m
+	}
+	if got := byID["reported"].MaxModelLen; got != 131072 {
+		t.Errorf("reported: config should win, got %d want 131072", got)
+	}
+	if got := byID["unreported"].MaxModelLen; got != 32768 {
+		t.Errorf("unreported: override should fill in, got %d want 32768", got)
+	}
+	if got := byID["untouched"].MaxModelLen; got != 8192 {
+		t.Errorf("untouched: should keep provider value, got %d want 8192", got)
+	}
+}

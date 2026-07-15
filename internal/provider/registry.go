@@ -17,9 +17,9 @@ import (
 
 // providerEntry pairs a provider with its optional capability and context-length overrides.
 type providerEntry struct {
-	provider              domain.Provider
-	capabilityOverrides   map[string][]string // model ID → capabilities; nil = no overrides
-	contextLengthOverrides map[string]int     // model ID → context window tokens; nil = none
+	provider               domain.Provider
+	capabilityOverrides    map[string][]string // model ID → capabilities; nil = no overrides
+	contextLengthOverrides map[string]int      // model ID → context window tokens; nil = none
 }
 
 // RegisterOption configures how a provider is registered.
@@ -64,7 +64,6 @@ func NewRegistry(interval time.Duration) *Registry {
 		fallbacks: make(map[string][]domain.Provider),
 	}
 }
-
 
 // Register adds a provider to the registry. Must be called before Start.
 func (r *Registry) Register(p domain.Provider, opts ...RegisterOption) {

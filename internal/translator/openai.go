@@ -293,6 +293,18 @@ func RequestToOpenAI(req domain.Request) ([]byte, error) {
 		Stream:      req.Stream,
 	}
 
+	if req.ResponseFormat != nil {
+		strict := req.ResponseFormat.Strict
+		oar.ResponseFormat = &oaResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &oaJSONSchemaSpec{
+				Name:   req.ResponseFormat.Name,
+				Schema: req.ResponseFormat.Schema,
+				Strict: &strict,
+			},
+		}
+	}
+
 	for _, m := range req.Messages {
 		content := stringToRaw(m.Content)
 		if len(m.RawContent) > 0 {

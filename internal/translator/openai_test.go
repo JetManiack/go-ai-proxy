@@ -3,6 +3,7 @@ package translator_test
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/JetManiack/go-ai-proxy/internal/domain"
@@ -1273,5 +1274,55 @@ func TestModelsToOpenAI_EmitsMaxModelLenWhenNonZero(t *testing.T) {
 	}
 	if _, has := parsed.Data[1]["max_model_len"]; has {
 		t.Errorf("[1].max_model_len should be omitted when 0; got: %v", parsed.Data[1])
+	}
+}
+
+func TestRequestToOpenAI_ResponseFormatRoundTrip(t *testing.T) {
+	req := domain.Request{
+		Model:    "m",
+		Messages: []domain.Message{{Role: "user", Content: "hi"}},
+		ResponseFormat: &domain.ResponseFormat{
+			Name:   "person",
+			Strict: true,
+			Schema: map[string]any{"type": "object"},
+		},
+	}
+	out, err := translator.RequestToOpenAI(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var wire struct {
+		ResponseFormat *struct {
+			Type       string `json:"type"`
+			JSONSchema *struct {
+				Name   string         `json:"name"`
+				Schema map[string]any `json:"schema"`
+				Strict *bool          `json:"strict"`
+			} `json:"json_schema"`
+		} `json:"response_format"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if wire.ResponseFormat == nil || wire.ResponseFormat.Type != "json_schema" {
+		t.Fatalf("response_format: got %+v, want type json_schema", wire.ResponseFormat)
+	}
+	js := wire.ResponseFormat.JSONSchema
+	if js == nil || js.Name != "person" || js.Schema["type"] != "object" {
+		t.Fatalf("json_schema: got %+v", js)
+	}
+	if js.Strict == nil || !*js.Strict {
+		t.Errorf("strict: got %v, want true", js.Strict)
+	}
+}
+
+func TestRequestToOpenAI_NoResponseFormatOmitted(t *testing.T) {
+	req := domain.Request{Model: "m", Messages: []domain.Message{{Role: "user", Content: "hi"}}}
+	out, err := translator.RequestToOpenAI(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(out), "response_format") {
+		t.Errorf("response_format should be omitted, got: %s", out)
 	}
 }

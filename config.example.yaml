@@ -81,8 +81,9 @@ providers:
   # GBNF grammar transparently; a client may also send `grammar` directly to
   # bypass the converter (escape hatch for schemas the converter can't handle).
   # llama.cpp /v1/models does NOT report capability info, so model_capabilities
-  # is REQUIRED — the provider refuses to start without explicit entries for
-  # every model it intends to serve.
+  # is REQUIRED — the provider refuses to start if the map is empty. A model
+  # missing from the map isn't fatal: it's served with no declared capabilities
+  # (logged as a warning), so it just won't be picked by `auto:` routing.
   # - name: llamacpp
   #   type: llama-cpp                 # converts response_format json_schema -> GBNF grammar
   #   base_url: "http://llama.local:8080"

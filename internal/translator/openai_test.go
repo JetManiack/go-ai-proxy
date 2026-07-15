@@ -627,6 +627,70 @@ func TestModelsFromOpenAI_ParsesCapabilitiesField(t *testing.T) {
 	}
 }
 
+// --- ResponseFormat ---
+
+func TestRequestFromOpenAI_ResponseFormatJSONSchema(t *testing.T) {
+	body := `{
+		"model": "m",
+		"messages": [{"role": "user", "content": "hi"}],
+		"response_format": {
+			"type": "json_schema",
+			"json_schema": {
+				"name": "person",
+				"strict": true,
+				"schema": {"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}
+			}
+		}
+	}`
+	req, err := translator.RequestFromOpenAI([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.ResponseFormat == nil {
+		t.Fatal("ResponseFormat is nil, want non-nil")
+	}
+	if req.ResponseFormat.Name != "person" {
+		t.Errorf("name: got %q, want %q", req.ResponseFormat.Name, "person")
+	}
+	if !req.ResponseFormat.Strict {
+		t.Error("strict: got false, want true")
+	}
+	if req.ResponseFormat.Schema["type"] != "object" {
+		t.Errorf("schema type: got %v, want object", req.ResponseFormat.Schema["type"])
+	}
+}
+
+func TestRequestFromOpenAI_ResponseFormatNonSchemaIsNil(t *testing.T) {
+	cases := map[string]string{
+		"text":              `{"type": "text"}`,
+		"json_object":       `{"type": "json_object"}`,
+		"json_schema_empty": `{"type": "json_schema", "json_schema": {"name": "x"}}`,
+	}
+	for name, rf := range cases {
+		t.Run(name, func(t *testing.T) {
+			body := `{"model": "m", "messages": [{"role": "user", "content": "hi"}], "response_format": ` + rf + `}`
+			req, err := translator.RequestFromOpenAI([]byte(body))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if req.ResponseFormat != nil {
+				t.Errorf("ResponseFormat: got %+v, want nil", req.ResponseFormat)
+			}
+		})
+	}
+}
+
+func TestRequestFromOpenAI_NoResponseFormatIsNil(t *testing.T) {
+	body := `{"model": "m", "messages": [{"role": "user", "content": "hi"}]}`
+	req, err := translator.RequestFromOpenAI([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.ResponseFormat != nil {
+		t.Errorf("ResponseFormat: got %+v, want nil", req.ResponseFormat)
+	}
+}
+
 func TestModelsFromOpenAI_ParsesOpenRouterModality(t *testing.T) {
 	body := `{"object":"list","data":[{"id":"m1","object":"model","owned_by":"openrouter","architecture":{"modality":"text+image->text"}}]}`
 	models, err := translator.ModelsFromOpenAI([]byte(body))

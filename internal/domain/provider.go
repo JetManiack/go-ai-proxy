@@ -28,6 +28,16 @@ type Tool struct {
 	Parameters  map[string]any // JSON Schema object
 }
 
+// ResponseFormat constrains the model's output to a JSON schema. A nil
+// *ResponseFormat on Request means no constraint (plain text). Only the
+// json_schema form is represented; response_format "text" and "json_object"
+// parse to nil.
+type ResponseFormat struct {
+	Name   string         // json_schema.name (OpenAI); ignored by Anthropic
+	Schema map[string]any // the JSON Schema object
+	Strict bool           // json_schema.strict (OpenAI); implicit on Anthropic
+}
+
 // Request is the provider-agnostic chat request.
 type Request struct {
 	Model           string
@@ -38,6 +48,7 @@ type Request struct {
 	Stream          bool
 	BudgetTokens    *int    // extended thinking budget; non-nil enables reasoning on supporting providers
 	ReasoningEffort *string // OpenAI-standard effort tier: "none" | "minimal" | "low" | "medium" | "high"
+	ResponseFormat  *ResponseFormat // non-nil enables structured output
 }
 
 // Model describes a single model available from a provider.

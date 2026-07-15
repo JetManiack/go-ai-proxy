@@ -16,19 +16,31 @@ import (
 // --- OpenAI wire format types (unexported) ---
 
 type oaRequest struct {
-	Model           string       `json:"model"`
-	Messages        []oaMessage  `json:"messages"`
-	Temperature     *float64     `json:"temperature,omitempty"`
-	MaxTokens       *int         `json:"max_tokens,omitempty"`
-	Stream          bool         `json:"stream,omitempty"`
-	Tools           []oaTool     `json:"tools,omitempty"`
-	BudgetTokens    *int         `json:"budget_tokens,omitempty"`
-	ReasoningEffort *string      `json:"reasoning_effort,omitempty"`
-	Reasoning       *oaReasoning `json:"reasoning,omitempty"`
+	Model           string            `json:"model"`
+	Messages        []oaMessage       `json:"messages"`
+	Temperature     *float64          `json:"temperature,omitempty"`
+	MaxTokens       *int              `json:"max_tokens,omitempty"`
+	Stream          bool              `json:"stream,omitempty"`
+	Tools           []oaTool          `json:"tools,omitempty"`
+	BudgetTokens    *int              `json:"budget_tokens,omitempty"`
+	ReasoningEffort *string           `json:"reasoning_effort,omitempty"`
+	Reasoning       *oaReasoning      `json:"reasoning,omitempty"`
+	ResponseFormat  *oaResponseFormat `json:"response_format,omitempty"`
 }
 
 type oaReasoning struct {
 	Effort *string `json:"effort,omitempty"`
+}
+
+type oaResponseFormat struct {
+	Type       string            `json:"type"` // "text" | "json_object" | "json_schema"
+	JSONSchema *oaJSONSchemaSpec `json:"json_schema,omitempty"`
+}
+
+type oaJSONSchemaSpec struct {
+	Name   string         `json:"name,omitempty"`
+	Schema map[string]any `json:"schema,omitempty"`
+	Strict *bool          `json:"strict,omitempty"`
 }
 
 type oaMessage struct {
@@ -227,6 +239,18 @@ func RequestFromOpenAI(body []byte) (domain.Request, error) {
 		req.ReasoningEffort = oar.ReasoningEffort
 	case oar.Reasoning != nil && oar.Reasoning.Effort != nil:
 		req.ReasoningEffort = oar.Reasoning.Effort
+	}
+
+	if rf := oar.ResponseFormat; rf != nil && rf.Type == "json_schema" &&
+		rf.JSONSchema != nil && len(rf.JSONSchema.Schema) > 0 {
+		out := &domain.ResponseFormat{
+			Name:   rf.JSONSchema.Name,
+			Schema: rf.JSONSchema.Schema,
+		}
+		if rf.JSONSchema.Strict != nil {
+			out.Strict = *rf.JSONSchema.Strict
+		}
+		req.ResponseFormat = out
 	}
 
 	for _, m := range oar.Messages {

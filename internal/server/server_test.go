@@ -1086,3 +1086,44 @@ func TestChatCompletions_NoResponseFormatNoWarn(t *testing.T) {
 		t.Errorf("unexpected structured_output warning: %s", logBuf.String())
 	}
 }
+
+func TestChatCompletions_ResponseFormatModelReportsCapsWithoutStructuredOutput(t *testing.T) {
+	// Capture the default slog output.
+	var logBuf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	var gotReq domain.Request
+	// vision-model has a non-empty capability list that does NOT include structured_output,
+	// exercising the middle branch of logStructuredOutputSupport (distinct from the
+	// "unknown/empty capabilities" branch covered by TestChatCompletions_ResponseFormatReachesProviderAndWarns).
+	fp := testutil.NewFakeProvider(domain.Model{ID: "vision-model", Capabilities: []string{"vision"}})
+	fp.ChatFunc = func(_ context.Context, req domain.Request) (domain.Response, error) {
+		gotReq = req
+		return domain.Response{ID: "r", Model: req.Model, Message: domain.Message{Role: "assistant", Content: "{}"}}, nil
+	}
+	srv := newTestServer(t, fp)
+
+	resp := chatRequest(t, srv, map[string]any{
+		"model":    "vision-model",
+		"messages": []map[string]any{{"role": "user", "content": "hi"}},
+		"response_format": map[string]any{
+			"type":        "json_schema",
+			"json_schema": map[string]any{"name": "x", "schema": map[string]any{"type": "object"}},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	if gotReq.ResponseFormat == nil {
+		t.Fatal("provider did not receive ResponseFormat")
+	}
+	if !strings.Contains(logBuf.String(), "model does not report structured_output capability") {
+		t.Errorf("expected the 'does not report structured_output capability' warning, got logs: %s", logBuf.String())
+	}
+	if strings.Contains(logBuf.String(), "structured_output capability unknown for model") {
+		t.Errorf("expected the specific 'does not report' branch message, but got the 'unknown' branch message instead: %s", logBuf.String())
+	}
+}

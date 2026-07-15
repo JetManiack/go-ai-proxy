@@ -49,6 +49,7 @@ type Request struct {
 	BudgetTokens    *int    // extended thinking budget; non-nil enables reasoning on supporting providers
 	ReasoningEffort *string // OpenAI-standard effort tier: "none" | "minimal" | "low" | "medium" | "high"
 	ResponseFormat  *ResponseFormat // non-nil enables structured output
+	Grammar         string // client-supplied GBNF (escape hatch); consumed only by the llama-cpp provider
 }
 
 // Model describes a single model available from a provider.

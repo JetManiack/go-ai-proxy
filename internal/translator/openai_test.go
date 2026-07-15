@@ -1326,3 +1326,29 @@ func TestRequestToOpenAI_NoResponseFormatOmitted(t *testing.T) {
 		t.Errorf("response_format should be omitted, got: %s", out)
 	}
 }
+
+func TestRequestFromOpenAI_ParsesGrammar(t *testing.T) {
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}],"grammar":"root ::= \"x\""}`
+	req, err := translator.RequestFromOpenAI([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Grammar != `root ::= "x"` {
+		t.Errorf("grammar: got %q, want %q", req.Grammar, `root ::= "x"`)
+	}
+}
+
+func TestRequestToOpenAI_NeverEmitsGrammar(t *testing.T) {
+	req := domain.Request{
+		Model:    "m",
+		Messages: []domain.Message{{Role: "user", Content: "hi"}},
+		Grammar:  `root ::= "x"`,
+	}
+	out, err := translator.RequestToOpenAI(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(out), "grammar") {
+		t.Errorf("grammar must not be emitted by RequestToOpenAI, got: %s", out)
+	}
+}

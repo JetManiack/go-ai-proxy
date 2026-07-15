@@ -26,6 +26,7 @@ type oaRequest struct {
 	ReasoningEffort *string           `json:"reasoning_effort,omitempty"`
 	Reasoning       *oaReasoning      `json:"reasoning,omitempty"`
 	ResponseFormat  *oaResponseFormat `json:"response_format,omitempty"`
+	Grammar         string            `json:"grammar,omitempty"`
 }
 
 type oaReasoning struct {
@@ -252,6 +253,8 @@ func RequestFromOpenAI(body []byte) (domain.Request, error) {
 		}
 		req.ResponseFormat = out
 	}
+
+	req.Grammar = oar.Grammar
 
 	for _, m := range oar.Messages {
 		text := rawToString(m.Content)

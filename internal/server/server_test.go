@@ -1032,3 +1032,57 @@ func TestStream_ClientDisconnect_BeforeHeadersLoggedAsInfo(t *testing.T) {
 		t.Errorf("audit should contain event=client_disconnect; got:\n%s", auditOut)
 	}
 }
+
+func TestChatCompletions_ResponseFormatReachesProviderAndWarns(t *testing.T) {
+	// Capture the default slog output.
+	var logBuf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	var gotReq domain.Request
+	fp := testutil.NewFakeProvider(domain.Model{ID: "plain-model"}) // no structured_output capability
+	fp.ChatFunc = func(_ context.Context, req domain.Request) (domain.Response, error) {
+		gotReq = req
+		return domain.Response{ID: "r", Model: req.Model, Message: domain.Message{Role: "assistant", Content: "{}"}}, nil
+	}
+	srv := newTestServer(t, fp)
+
+	resp := chatRequest(t, srv, map[string]any{
+		"model":    "plain-model",
+		"messages": []map[string]any{{"role": "user", "content": "hi"}},
+		"response_format": map[string]any{
+			"type":        "json_schema",
+			"json_schema": map[string]any{"name": "x", "schema": map[string]any{"type": "object"}},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	if gotReq.ResponseFormat == nil {
+		t.Fatal("provider did not receive ResponseFormat")
+	}
+	if !strings.Contains(logBuf.String(), "structured_output") {
+		t.Errorf("expected a structured_output warning, got logs: %s", logBuf.String())
+	}
+}
+
+func TestChatCompletions_NoResponseFormatNoWarn(t *testing.T) {
+	var logBuf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	fp := testutil.NewFakeProvider(domain.Model{ID: "plain-model"})
+	srv := newTestServer(t, fp)
+
+	resp := chatRequest(t, srv, map[string]any{
+		"model":    "plain-model",
+		"messages": []map[string]any{{"role": "user", "content": "hi"}},
+	})
+	defer resp.Body.Close()
+	if strings.Contains(logBuf.String(), "structured_output") {
+		t.Errorf("unexpected structured_output warning: %s", logBuf.String())
+	}
+}

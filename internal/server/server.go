@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -78,6 +79,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+// logStructuredOutputSupport emits a routing-time warning when a structured
+// output request targets a model that is unlikely to support it. It never
+// blocks the request — the upstream provider is the source of truth.
+func (s *Server) logStructuredOutputSupport(modelID string) {
+	caps, known := s.registry.CapabilitiesFor(modelID)
+	switch {
+	case !known || len(caps) == 0:
+		slog.Warn("response_format requested; structured_output capability unknown for model",
+			"model", modelID)
+	case !slices.Contains(caps, "structured_output"):
+		slog.Warn("response_format requested; model does not report structured_output capability",
+			"model", modelID)
+	}
+}
+
 // handleChatCompletions handles POST /v1/chat/completions.
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -130,6 +146,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "token_budget_exceeded",
 			fmt.Sprintf("max_tokens %d exceeds budget of %d for model %q", *req.MaxTokens, limit, req.Model))
 		return
+	}
+
+	if req.ResponseFormat != nil {
+		s.logStructuredOutputSupport(req.Model)
 	}
 
 	if req.Stream {

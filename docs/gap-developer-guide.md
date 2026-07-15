@@ -503,3 +503,42 @@ curl -N http://gap.local:8090/v1/chat/completions -H 'content-type: application/
   "messages":[{"role":"user","content":"Объясни шаг за шагом"}]
 }'
 ```
+
+---
+
+## 16. llama-cpp: manual verification (ручная e2e-проверка)
+
+Юнит-тесты конвертера JSON Schema → GBNF (`internal/provider/llamacpp`) доказывают
+только то, что прокси **генерирует корректный по структуре GBNF-текст** — они не
+поднимают настоящий llama.cpp и не проверяют, что его сэмплер **принимает** эту
+грамматику и реально **ограничивает** ей вывод модели. Это отдельный, обязательный
+шаг: перед тем как полагаться на structured output этого провайдера в проде, кто-то
+с доступом к живому llama.cpp + Gemma-3 эндпоинту должен прогнать его руками.
+
+Рецепт (запрос идёт через прокси на `127.0.0.1:8090`, провайдер `type: llama-cpp`):
+
+```bash
+curl -s http://127.0.0.1:8090/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "<gemma-model-id>",
+    "messages": [{"role":"user","content":"Категоризируй: не приходит счёт за ноябрь"}],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "cat",
+        "schema": {
+          "type": "object",
+          "properties": {"category": {"type": "string", "enum": ["spam","billing","support"]}},
+          "required": ["category"]
+        }
+      }
+    }
+  }'
+```
+
+Критерий прохождения: HTTP `200` **и** содержимое `choices[0].message.content` —
+строго одно из значений enum в объекте `{"category": ...}` (не свободный текст и
+не `400`-ошибка сэмплера). Если ответ не парсится как такой JSON или значение
+category лежит вне enum — сгенерированная GBNF-грамматика не сработала на реальном
+сэмплере llama.cpp, даже если юнит-тесты прокси зелёные.

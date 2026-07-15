@@ -436,3 +436,61 @@ func TestChat_ExtendedThinkingIgnoresTemperature(t *testing.T) {
 		t.Error("temperature should not be sent when extended thinking is enabled")
 	}
 }
+
+func TestChat_ResponseFormatSetsOutputConfig(t *testing.T) {
+	var gotBody map[string]any
+	srv := newFakeAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(anthropicTextResponse("msg-1", "claude-sonnet-4-6", `{"name":"x"}`, 3, 2))
+	})
+
+	p := anthropicprovider.New(auth.NewAPIKey("sk-test"), anthropicprovider.WithBaseURL(srv.URL))
+	_, err := p.Chat(context.Background(), domain.Request{
+		Model:    "claude-sonnet-4-6",
+		Messages: []domain.Message{{Role: "user", Content: "Hi"}},
+		ResponseFormat: &domain.ResponseFormat{
+			Name:   "person",
+			Schema: map[string]any{"type": "object"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Chat error: %v", err)
+	}
+	oc, ok := gotBody["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config missing or wrong type: %v", gotBody["output_config"])
+	}
+	format, ok := oc["format"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config.format missing: %v", oc)
+	}
+	if format["type"] != "json_schema" {
+		t.Errorf("format.type: got %v, want json_schema", format["type"])
+	}
+	schema, ok := format["schema"].(map[string]any)
+	if !ok || schema["type"] != "object" {
+		t.Errorf("format.schema: got %v", format["schema"])
+	}
+}
+
+func TestChat_NoResponseFormatOmitsOutputConfig(t *testing.T) {
+	var gotBody map[string]any
+	srv := newFakeAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(anthropicTextResponse("msg-1", "claude-sonnet-4-6", "hi", 3, 2))
+	})
+
+	p := anthropicprovider.New(auth.NewAPIKey("sk-test"), anthropicprovider.WithBaseURL(srv.URL))
+	_, err := p.Chat(context.Background(), domain.Request{
+		Model:    "claude-sonnet-4-6",
+		Messages: []domain.Message{{Role: "user", Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat error: %v", err)
+	}
+	if _, present := gotBody["output_config"]; present {
+		t.Errorf("output_config should be omitted, got: %v", gotBody["output_config"])
+	}
+}

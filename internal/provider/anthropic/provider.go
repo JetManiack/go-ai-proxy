@@ -275,6 +275,12 @@ func toMessageParams(req domain.Request) (anthropic.MessageNewParams, error) {
 		p.Tools = tools
 	}
 
+	if req.ResponseFormat != nil {
+		p.OutputConfig = anthropic.OutputConfigParam{
+			Format: anthropic.JSONOutputFormatParam{Schema: req.ResponseFormat.Schema},
+		}
+	}
+
 	return p, nil
 }
 

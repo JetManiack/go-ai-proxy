@@ -530,3 +530,35 @@ func TestRegistry_RefreshUpdatesIndex(t *testing.T) {
 		t.Error("model-v2 should be in the index after refresh")
 	}
 }
+
+func TestCapabilitiesFor(t *testing.T) {
+	fp := testutil.NewFakeProvider(
+		domain.Model{ID: "with-caps", Capabilities: []string{"structured_output", "vision"}},
+		domain.Model{ID: "no-caps"},
+	)
+	reg := provider.NewRegistry(time.Hour)
+	reg.Register(fp)
+	if err := reg.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	caps, known := reg.CapabilitiesFor("with-caps")
+	if !known {
+		t.Fatal("with-caps: known=false, want true")
+	}
+	if len(caps) != 2 || caps[0] != "structured_output" {
+		t.Errorf("with-caps caps: got %v", caps)
+	}
+
+	caps, known = reg.CapabilitiesFor("no-caps")
+	if !known {
+		t.Fatal("no-caps: known=false, want true")
+	}
+	if len(caps) != 0 {
+		t.Errorf("no-caps caps: got %v, want empty", caps)
+	}
+
+	if _, known := reg.CapabilitiesFor("absent"); known {
+		t.Error("absent: known=true, want false")
+	}
+}

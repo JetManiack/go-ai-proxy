@@ -365,3 +365,17 @@ func (r *Registry) Models() []domain.Model {
 	copy(out, r.allModels)
 	return out
 }
+
+// CapabilitiesFor returns the capability list for a concrete model ID and
+// whether the model is known to the registry. Capabilities may be empty for a
+// known model that does not report them. Intended for observability, not routing.
+func (r *Registry) CapabilitiesFor(modelID string) ([]string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, m := range r.allModels {
+		if m.ID == modelID {
+			return m.Capabilities, true
+		}
+	}
+	return nil, false
+}

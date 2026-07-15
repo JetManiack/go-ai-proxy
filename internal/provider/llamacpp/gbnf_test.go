@@ -72,3 +72,63 @@ func TestSchemaToGBNF_MissingType(t *testing.T) {
 		t.Fatal("expected error for missing type, got nil")
 	}
 }
+
+func TestSchemaToGBNF_ArrayOfStrings(t *testing.T) {
+	schema := map[string]any{
+		"type":  "array",
+		"items": map[string]any{"type": "string"},
+	}
+	got, err := schemaToGBNF(schema)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "root ::= arr0\n" +
+		"arr0 ::= \"[\" space ( string (\",\" space string)* )? space \"]\"\n" +
+		"space ::= | \" \" | \"\\n\"{1,2} [ \\t]{0,20}\n" +
+		"char ::= [^\"\\\\\\x7F\\x00-\\x1F] | [\\\\] ([\"\\\\bfnrt] | \"u\" [0-9a-fA-F]{4})\n" +
+		"string ::= \"\\\"\" char* \"\\\"\"\n"
+	if got != want {
+		t.Errorf("grammar mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestSchemaToGBNF_AnyOf(t *testing.T) {
+	schema := map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			map[string]any{"type": "boolean"},
+		},
+	}
+	got, err := schemaToGBNF(schema)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "root ::= (string | boolean)\n" +
+		"char ::= [^\"\\\\\\x7F\\x00-\\x1F] | [\\\\] ([\"\\\\bfnrt] | \"u\" [0-9a-fA-F]{4})\n" +
+		"string ::= \"\\\"\" char* \"\\\"\"\n" +
+		"boolean ::= (\"true\" | \"false\")\n"
+	if got != want {
+		t.Errorf("grammar mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestGbnfJSONString_Escaping(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain", "plain", `"\"plain\""`},
+		{"quote", `a"b`, `"\"a\"b\""`},
+		{"backslash", `a\b`, `"\"a\\b\""`},
+		{"newline", "line1\nline2", `"\"line1\nline2\""`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := gbnfJSONString(tc.input)
+			if got != tc.want {
+				t.Errorf("gbnfJSONString(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}

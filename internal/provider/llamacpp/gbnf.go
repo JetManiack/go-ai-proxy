@@ -91,6 +91,10 @@ func (b *gbnfBuilder) value(schema map[string]any) (string, error) {
 		}
 	}
 
+	if altsRaw, ok := firstPresent(schema, "anyOf", "oneOf"); ok {
+		return b.union(altsRaw)
+	}
+
 	if enumRaw, ok := schema["enum"]; ok {
 		return b.enum(enumRaw)
 	}
@@ -111,9 +115,21 @@ func (b *gbnfBuilder) value(schema map[string]any) (string, error) {
 		return "boolean", nil
 	case "object":
 		return b.object(schema)
+	case "array":
+		return b.array(schema)
 	default:
 		return "", fmt.Errorf("llamacpp: unsupported or missing schema type %q; supply an explicit grammar field for this schema", typ)
 	}
+}
+
+// firstPresent returns the value of the first present key among names.
+func firstPresent(schema map[string]any, names ...string) (any, bool) {
+	for _, n := range names {
+		if v, ok := schema[n]; ok {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 // enum builds an alternation of string-literal terminals.
@@ -131,6 +147,45 @@ func (b *gbnfBuilder) enum(enumRaw any) (string, error) {
 		alts = append(alts, gbnfJSONString(s))
 	}
 	return "(" + strings.Join(alts, " | ") + ")", nil
+}
+
+// union builds an alternation of sub-schema expressions (anyOf / oneOf).
+func (b *gbnfBuilder) union(altsRaw any) (string, error) {
+	list, ok := altsRaw.([]any)
+	if !ok || len(list) == 0 {
+		return "", fmt.Errorf("llamacpp: anyOf/oneOf must be a non-empty array")
+	}
+	exprs := make([]string, 0, len(list))
+	for _, sub := range list {
+		subSchema, ok := sub.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("llamacpp: anyOf/oneOf entries must be schema objects")
+		}
+		e, err := b.value(subSchema)
+		if err != nil {
+			return "", err
+		}
+		exprs = append(exprs, e)
+	}
+	return "(" + strings.Join(exprs, " | ") + ")", nil
+}
+
+// array builds a named rule for a JSON array of items.
+func (b *gbnfBuilder) array(schema map[string]any) (string, error) {
+	itemsRaw, ok := schema["items"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("llamacpp: array schema requires an 'items' object; supply an explicit grammar")
+	}
+	name := fmt.Sprintf("arr%d", b.arrCount)
+	b.arrCount++
+	itemExpr, err := b.value(itemsRaw)
+	if err != nil {
+		return "", err
+	}
+	b.usePrim("space")
+	rule := fmt.Sprintf(`%s ::= "[" space ( %s ("," space %s)* )? space "]"`, name, itemExpr, itemExpr)
+	b.rules = append(b.rules, rule)
+	return name, nil
 }
 
 // object builds a named rule for a JSON object; properties are emitted sorted

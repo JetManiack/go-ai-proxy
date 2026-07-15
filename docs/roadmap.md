@@ -282,3 +282,16 @@ Not scheduled, but worth tracking:
 - **[backlog] Legacy `function_call` parsing** — accept the deprecated single-call
   format on input and translate to canonical `tool_calls` on output, for
   downstream clients using pre-2024 OpenAI clients.
+
+### Deferred from llama-cpp grammar provider design (2026-07-15, see specs/2026-07-15-llamacpp-grammar-design.md)
+
+- **`400` for unsupported structured-output schema** — when the `llama-cpp`
+  provider's json_schema→GBNF converter rejects a schema (unsupported keyword
+  like `pattern`/`$ref`, missing type), the mutator error currently propagates
+  through the shared server fallback loop and reaches the client as `502`
+  ("all providers failed: … unsupported JSON Schema keyword …"). It should be
+  a `400` so clients don't retry an unfixable request and instead learn to
+  send an explicit `grammar` or a supported schema. Requires a typed mutator
+  error (e.g. alongside `provider.RateLimitError`) mapped to `400` in
+  `handleChatCompletions` and `handleStream` — a cross-cutting change to the
+  shared server error loop.

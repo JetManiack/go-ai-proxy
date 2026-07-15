@@ -105,6 +105,30 @@ func TestChat_NoStructuredOutputBodyUnchanged(t *testing.T) {
 	}
 }
 
+func TestChat_ExplicitGrammarWinsAndStripsResponseFormat(t *testing.T) {
+	var body map[string]any
+	srv := fakeChatServer(t, &body)
+	p := newProvider(t, srv.URL)
+
+	_, err := p.Chat(context.Background(), domain.Request{
+		Model:    "gemma",
+		Messages: []domain.Message{{Role: "user", Content: "hi"}},
+		Grammar:  `root ::= "yes" | "no"`,
+		ResponseFormat: &domain.ResponseFormat{
+			Schema: map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if body["grammar"] != `root ::= "yes" | "no"` {
+		t.Errorf("explicit grammar must win, got: %v", body["grammar"])
+	}
+	if _, present := body["response_format"]; present {
+		t.Errorf("response_format must be stripped, got: %v", body["response_format"])
+	}
+}
+
 func TestChat_UnsupportedSchemaErrors(t *testing.T) {
 	var body map[string]any
 	srv := fakeChatServer(t, &body)

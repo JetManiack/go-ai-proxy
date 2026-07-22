@@ -210,7 +210,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "provider_busy", "all providers are at capacity, retry later")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("all providers failed: %v", lastErr))
+		writeProviderFailure(w, lastErr)
 		return
 	}
 	auditChat(s.auditLogger, r.Context(), req, &resp, nil, start)
@@ -283,7 +283,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, candidates
 			writeError(w, http.StatusServiceUnavailable, "provider_busy", "all providers are at capacity, retry later")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("all providers failed: %v", lastErr))
+		writeProviderFailure(w, lastErr)
 		return
 	}
 
@@ -450,18 +450,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "provider_busy", "all providers are at capacity, retry later")
 			return
 		}
-		// A 4xx from the upstream embeddings backend (e.g. input exceeds its
-		// token limit) is proxied verbatim — gap has no tokenizer to validate
-		// input length itself, so the upstream's own rejection is the most
-		// accurate signal the client can get. A 5xx still collapses to gap's
-		// own 502 framing below, since that's an infra failure, not a
-		// client-caused request problem.
-		var ue *provider.UpstreamError
-		if errors.As(lastErr, &ue) && ue.StatusCode >= 400 && ue.StatusCode < 500 {
-			writeError(w, ue.StatusCode, "provider_error", ue.Body)
-			return
-		}
-		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("all providers failed: %v", lastErr))
+		writeProviderFailure(w, lastErr)
 		return
 	}
 	auditEmbeddings(s.auditLogger, r.Context(), req, &resp, nil, start)
@@ -533,4 +522,20 @@ func writeError(w http.ResponseWriter, status int, errType, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	w.Write(body)
+}
+
+// writeProviderFailure maps the final error from an exhausted candidate
+// fan-out to a client response. A 4xx captured in *provider.UpstreamError
+// (e.g. invalid/oversized input) is proxied to the client verbatim — same
+// status, same body — since gap can't validate the request itself and the
+// upstream's own rejection is the most accurate signal available. Anything
+// else (5xx, untyped errors) collapses to gap's own 502 upstream_error.
+// Used by handleChatCompletions, handleStream, and handleEmbeddings.
+func writeProviderFailure(w http.ResponseWriter, lastErr error) {
+	var ue *provider.UpstreamError
+	if errors.As(lastErr, &ue) && ue.StatusCode >= 400 && ue.StatusCode < 500 {
+		writeError(w, ue.StatusCode, "provider_error", ue.Body)
+		return
+	}
+	writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("all providers failed: %v", lastErr))
 }

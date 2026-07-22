@@ -155,14 +155,20 @@ func (p *Provider) fetchNativeModels(ctx context.Context) ([]domain.Model, error
 
 	var models []domain.Model
 	for _, m := range native.Models {
-		if m.Type != "llm" {
-			continue
+		switch m.Type {
+		case "llm":
+			models = append(models, domain.Model{
+				ID:           m.Key,
+				OwnedBy:      "lmstudio",
+				Capabilities: mapCapabilities(m.Capabilities),
+			})
+		case "embedding":
+			models = append(models, domain.Model{
+				ID:           m.Key,
+				OwnedBy:      "lmstudio",
+				Capabilities: []string{"embeddings"},
+			})
 		}
-		models = append(models, domain.Model{
-			ID:           m.Key,
-			OwnedBy:      "lmstudio",
-			Capabilities: mapCapabilities(m.Capabilities),
-		})
 	}
 	return models, nil
 }

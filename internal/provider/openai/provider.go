@@ -143,6 +143,44 @@ func (p *Provider) Chat(ctx context.Context, req domain.Request) (domain.Respons
 	return translator.ResponseFromOpenAI(respBody)
 }
 
+// Embeddings sends a request to the upstream /v1/embeddings endpoint.
+func (p *Provider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	body, err := translator.EmbedRequestToOpenAI(req)
+	if err != nil {
+		return domain.EmbedResponse{}, fmt.Errorf("openai: encode embeddings request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		p.baseURL+"/v1/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return domain.EmbedResponse{}, fmt.Errorf("openai: build embeddings request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	httpResp, err := p.client.Do(httpReq)
+	if err != nil {
+		return domain.EmbedResponse{}, fmt.Errorf("openai: do embeddings request: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return domain.EmbedResponse{}, fmt.Errorf("openai: read embeddings response: %w", err)
+	}
+	if httpResp.StatusCode == http.StatusTooManyRequests {
+		retryAfter := provider.ParseRetryAfter(httpResp.Header.Get("Retry-After"))
+		return domain.EmbedResponse{}, &provider.RateLimitError{RetryAfter: retryAfter}
+	}
+	if httpResp.StatusCode != http.StatusOK {
+		return domain.EmbedResponse{}, fmt.Errorf("openai: upstream returned %d: %s", httpResp.StatusCode, respBody)
+	}
+
+	return translator.EmbedResponseFromOpenAI(respBody)
+}
+
 // ChatStream initiates a streaming chat request and returns a channel of chunks.
 func (p *Provider) ChatStream(ctx context.Context, req domain.Request) (<-chan domain.Chunk, error) {
 	req.Stream = true

@@ -90,6 +90,12 @@ func (p *Provider) ChatStream(ctx context.Context, req domain.Request) (<-chan d
 	return p.inner.ChatStream(ctx, req)
 }
 
+// Embeddings delegates to the inner openai provider. The mutator is not
+// invoked — chat_template_kwargs injection has no meaning for embeddings.
+func (p *Provider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	return p.inner.Embeddings(ctx, req)
+}
+
 // Models discovers (or falls back to configured) model IDs, validates them
 // against ModelCapabilities, and returns the validated set.
 //

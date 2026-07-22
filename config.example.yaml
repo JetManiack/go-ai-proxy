@@ -29,6 +29,9 @@ providers:
     #   "llama-3.2-vision": ["vision"]
     #   "qwq-32b": ["reasoning"]
     #   "deepseek-r1": ["reasoning"]
+    #   "text-embedding-nomic-embed-text-v1.5": ["embeddings"]  # LM Studio's own
+    #     /api/v1/models already tags embedding-type models with "embeddings"
+    #     automatically — only needed here for other OpenAI-compatible backends.
 
   # ── LiteLLM (auto-discovers capabilities via /model/info) ────────────────────
   # - name: litellm
@@ -44,12 +47,17 @@ providers:
   #   base_url: "http://localhost:11434"
 
   # ── OpenAI ───────────────────────────────────────────────────────────────────
+  # OpenAI's /v1/models doesn't flag embedding models either — tag them
+  # manually so `auto:embeddings` / POST /v1/embeddings routing works.
   # - name: openai
   #   type: openai
   #   base_url: "https://api.openai.com"
   #   auth:
   #     method: api_key
   #     api_key: "${OPENAI_API_KEY}"
+  #   model_capabilities:
+  #     "text-embedding-3-small": ["embeddings"]
+  #     "text-embedding-3-large": ["embeddings"]
 
   # ── vLLM (e.g. gemma-4-31b-it on a self-hosted server) ─────────────────────
   # OpenAI-compatible, but with two upstream quirks the proxy handles:
@@ -93,6 +101,9 @@ providers:
   #     "gemma-3-27b-it": ["structured_output"]
 
   # ── Anthropic ────────────────────────────────────────────────────────────────
+  # No embeddings support — Anthropic has no native embeddings API (Voyage AI
+  # is Anthropic's ecosystem answer, not wired up here). POST /v1/embeddings
+  # skips this provider and falls through to the next candidate.
   # - name: anthropic
   #   type: anthropic
   #   auth:

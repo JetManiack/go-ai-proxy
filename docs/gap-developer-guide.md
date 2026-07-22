@@ -66,8 +66,10 @@ curl http://gap.local:8090/v1/models
 
 Возможные значения `capabilities`: `vision`, `reasoning`, `tools`, `pdf`,
 `prompt_caching`, `structured_output`, `web_search`, `audio_input`,
-`audio_output`, `computer_use`, `url_context`. Для генеративных моделей без
-эмбеддингов список не содержит `embeddings` — отдельная подсистема.
+`audio_output`, `computer_use`, `url_context`, `embeddings`. Модель с тегом
+`embeddings` обслуживает `POST /v1/embeddings` (см. ниже), а не чат — она не
+участвует в `auto:` селекторах без явного `embeddings` в списке требуемых
+капабилити.
 
 Поле `max_model_len` (когда оно есть) — суммарный лимит на `prompt + completion`
 в токенах. Прокси отдаёт его прозрачно, если апстрим сообщил (vLLM, например);
@@ -105,7 +107,44 @@ curl http://gap.local:8090/v1/models
 
 ---
 
-## 4. Reasoning (Chain-of-Thought)
+## 4. Embeddings (`POST /v1/embeddings`)
+
+Работает так же, как `/v1/chat/completions`: тот же роутинг по модели/`auto:`,
+тот же fallback между провайдерами при rate-limit/ошибке, тот же OpenAI-формат.
+Стриминга нет — OpenAI embeddings API его не поддерживает.
+
+```bash
+curl http://gap.local:8090/v1/embeddings -H 'content-type: application/json' -d '{
+  "model": "text-embedding-3-small",
+  "input": ["первый текст", "второй текст"]
+}'
+```
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"object": "embedding", "index": 0, "embedding": [0.0023, -0.009, ...]},
+    {"object": "embedding", "index": 1, "embedding": [0.0011, 0.041, ...]}
+  ],
+  "model": "text-embedding-3-small",
+  "usage": {"prompt_tokens": 12, "total_tokens": 12}
+}
+```
+
+`input` принимает как одну строку, так и массив строк. `encoding_format` —
+`"float"` (по умолчанию) или `"base64"` (float32, little-endian, как у
+официального OpenAI SDK). Опциональный `dimensions` пробрасывается апстриму,
+если задан.
+
+Маршрутизация использует ту же capability-систему, что и `auto:*` для чата —
+модели, обслуживающие эмбеддинги, помечены капабилити `"embeddings"` (см. §2).
+**Anthropic не поддерживает эмбеддинги нативно** — если он есть в цепочке
+fallback, прокси просто пропускает его и идёт к следующему кандидату.
+
+---
+
+## 5. Reasoning (Chain-of-Thought)
 
 ### Включение
 
@@ -179,7 +218,7 @@ OpenAI o1 моделей. Попадание в prefix-кэш отражаетс
 
 ---
 
-## 5. Стриминг
+## 6. Стриминг
 
 Стандартный OpenAI SSE: `"stream": true` в запросе, ответ кусками
 `data: {...}\n\n` плюс терминатор `data: [DONE]\n\n`. Каждый чанк может
@@ -201,7 +240,7 @@ upstream-запрос тоже отменяется (контекст пробр
 
 ---
 
-## 6. Tool calling (функции)
+## 7. Tool calling (функции)
 
 Стандартный OpenAI tool-calling без изменений:
 
@@ -229,7 +268,7 @@ upstream-запрос тоже отменяется (контекст пробр
 
 ---
 
-## 7. Structured output (`response_format`)
+## 8. Structured output (`response_format`)
 
 Стандартный OpenAI-параметр `response_format` для получения ответа в заданной JSON-схеме:
 
@@ -289,7 +328,7 @@ extension-параметр **`grammar`** (строка) в теле запрос
 
 ---
 
-## 8. Multimodal (картинки / PDF)
+## 9. Multimodal (картинки / PDF)
 
 OpenAI vision-формат:
 ```json
@@ -312,7 +351,7 @@ PDF (поддерживают только модели с `pdf` в capabilities
 
 ---
 
-## 9. `usage` и оптимизация затрат
+## 10. `usage` и оптимизация затрат
 
 Стандартное OpenAI-поле `usage` в ответе плюс расширения:
 
@@ -340,7 +379,7 @@ OpenAI prompt cache). Используйте, чтобы оценивать эф
 
 ---
 
-## 10. Лимиты, ошибки, ретраи
+## 11. Лимиты, ошибки, ретраи
 
 ### Коды ошибок
 
@@ -383,7 +422,7 @@ OpenAI prompt cache). Используйте, чтобы оценивать эф
 
 ---
 
-## 11. Health, metrics, audit
+## 12. Health, metrics, audit
 
 | Endpoint | Назначение |
 |---|---|
@@ -401,7 +440,7 @@ OpenAI prompt cache). Используйте, чтобы оценивать эф
 
 ---
 
-## 12. Авторизация прокси
+## 13. Авторизация прокси
 
 По умолчанию прокси **сам по себе не валидирует** `api_key` — он рассчитан
 на работу за периметром сети или за reverse proxy с авторизацией. В таком
@@ -417,7 +456,7 @@ Personal Access Tokens через веб-UI — детали см. в `docs/road
 
 ---
 
-## 13. Отладка: пустой ответ или «перемешанный» текст
+## 14. Отладка: пустой ответ или «перемешанный» текст
 
 Если клиент видит **пустой** ответ или **перемешанный** текст — почти всегда баг
 **на стороне клиента**, не прокси и не апстрима. Этот раздел — короткий чек-лист.
@@ -468,7 +507,7 @@ upstream-поведения — в `docs/vllm-developer-guide.md` §5.
 
 ---
 
-## 14. Чек-лист «граблей»
+## 15. Чек-лист «граблей»
 
 - [ ] `/v1` обязателен в base_url. Без него — 404 на `/models`.
 - [ ] `api_key` — любая непустая строка по умолчанию; если прокси с auth — ваш реальный токен.
@@ -482,7 +521,7 @@ upstream-поведения — в `docs/vllm-developer-guide.md` §5.
 
 ---
 
-## 15. Полезные команды
+## 16. Полезные команды
 
 ```bash
 # узнать какие модели доступны
@@ -511,7 +550,7 @@ curl -N http://gap.local:8090/v1/chat/completions -H 'content-type: application/
 
 ---
 
-## 16. llama-cpp: manual verification (ручная e2e-проверка)
+## 17. llama-cpp: manual verification (ручная e2e-проверка)
 
 Юнит-тесты конвертера JSON Schema → GBNF (`internal/provider/llamacpp`) доказывают
 только то, что прокси **генерирует корректный по структуре GBNF-текст** — они не

@@ -258,6 +258,37 @@ providers:
 
 ---
 
+## Embeddings
+
+`POST /v1/embeddings` works exactly like `/v1/chat/completions`: same model
+routing, same fallback/rate-limit/queue-full handling, same OpenAI wire format
+(`input` as a string or array of strings; `encoding_format: "float" | "base64"`;
+optional `dimensions`). There is no streaming variant.
+
+Embedding models are tagged with the `"embeddings"` capability, the same way
+`vision`/`reasoning` are tagged today — either automatically (LM Studio's
+native `/api/v1/models` reports embedding-type models, and `gap` tags them
+`["embeddings"]`) or manually via `model_capabilities`:
+
+```yaml
+providers:
+  - name: openai
+    type: openai
+    base_url: "https://api.openai.com"
+    auth:
+      method: api_key
+      api_key: "${OPENAI_API_KEY}"
+    model_capabilities:
+      "text-embedding-3-small": ["embeddings"]
+```
+
+This makes `auto:embeddings` work like any other capability selector. **Anthropic
+has no native embeddings API** (Voyage AI is Anthropic's ecosystem answer, not
+wired up here) — a request routed to a bounded Anthropic provider simply falls
+through to the next candidate.
+
+---
+
 ## Thinking / chain-of-thought
 
 `gap` transparently extracts extended thinking content from providers that support

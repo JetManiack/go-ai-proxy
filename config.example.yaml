@@ -32,6 +32,13 @@ providers:
     #   "text-embedding-nomic-embed-text-v1.5": ["embeddings"]  # LM Studio's own
     #     /api/v1/models already tags embedding-type models with "embeddings"
     #     automatically — only needed here for other OpenAI-compatible backends.
+    # model_context_length:  # per-model input token limit, surfaced to clients via
+    #                        # /v1/models max_model_len; applies to embedding models
+    #                        # too (they usually cap input size — e.g. 2048 tokens).
+    #                        # gap does not tokenize/validate this itself — an
+    #                        # oversized chunk gets the upstream's own error
+    #                        # proxied back verbatim (see docs/config.md).
+    #   "text-embedding-nomic-embed-text-v1.5": 2048
 
   # ── LiteLLM (auto-discovers capabilities via /model/info) ────────────────────
   # - name: litellm

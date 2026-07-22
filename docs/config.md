@@ -287,6 +287,28 @@ has no native embeddings API** (Voyage AI is Anthropic's ecosystem answer, not
 wired up here) — a request routed to a bounded Anthropic provider simply falls
 through to the next candidate.
 
+### Per-model token limits
+
+Many embedding models cap input at a fixed size (commonly 512, 2048, or
+8192 tokens — it varies by model). `gap` does not tokenize or validate input
+length itself — that would need a per-model tokenizer, which isn't generically
+available. Instead:
+
+- The limit is surfaced to clients via `max_model_len` in `GET /v1/models`
+  (the same field already used for chat context windows), populated
+  automatically when the upstream reports it, or overridden manually with
+  `model_context_length` in the provider's config — it applies to embedding
+  models exactly like chat models:
+
+  ```yaml
+  model_context_length:
+    "nomic-embed-text-v1.5": 2048
+  ```
+
+- If a client sends an oversized chunk anyway, the upstream backend rejects
+  it (typically `400`), and `gap` proxies that rejection verbatim — same
+  status code, same message — rather than folding it into a generic `502`.
+
 ---
 
 ## Thinking / chain-of-thought

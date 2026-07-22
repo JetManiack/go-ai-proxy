@@ -61,6 +61,7 @@ func New(reg *provider.Registry, opts ...Option) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+	mux.HandleFunc("/v1/embeddings", s.handleEmbeddings)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/metrics", s.handleMetrics)
@@ -347,6 +348,123 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, candidates
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
 	recordStreamEnd()
+}
+
+// handleEmbeddings handles POST /v1/embeddings. There is no streaming
+// variant — OpenAI's embeddings API isn't streamable.
+func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only POST is supported")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large",
+				fmt.Sprintf("request body exceeds limit of %d bytes", maxErr.Limit))
+			return
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "failed to read request body")
+		return
+	}
+
+	req, err := translator.EmbedRequestFromOpenAI(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("invalid request: %v", err))
+		return
+	}
+
+	originalModel := req.Model
+	candidates := s.registry.CandidatesFor(originalModel)
+	if len(candidates) == 0 {
+		slog.Info("model not in cache, triggering on-demand refresh", "model", originalModel)
+		s.registry.Refresh(r.Context())
+		candidates = s.registry.CandidatesFor(originalModel)
+	}
+	if len(candidates) == 0 {
+		models := s.registry.Models()
+		ids := make([]string, len(models))
+		for i, m := range models {
+			ids[i] = m.ID
+		}
+		writeError(w, http.StatusBadRequest, "model_not_found",
+			fmt.Sprintf("model %q not available; known models: %v", originalModel, ids))
+		return
+	}
+
+	start := time.Now()
+	var resp domain.EmbedResponse
+	var lastErr error
+	allRateLimited := len(candidates) > 0
+	var maxRetryAfter time.Duration
+	for _, c := range candidates {
+		req.Model = c.ModelID
+
+		var err error
+		ep, ok := c.Provider.(domain.EmbeddingsProvider)
+		if !ok {
+			err = fmt.Errorf("%s: embeddings not supported", c.Provider.Name())
+		} else {
+			resp, err = ep.Embeddings(r.Context(), req)
+		}
+		durationMs := time.Since(start).Milliseconds()
+		if err == nil {
+			lastErr = nil
+			allRateLimited = false
+			if s.metrics != nil {
+				s.metrics.RecordRequest(req.Model, c.Provider.Name(), "success", durationMs)
+				s.metrics.RecordTokens(c.Provider.Name(), req.Model, resp.Usage.PromptTokens, 0, 0)
+			}
+			break
+		}
+		if s.metrics != nil {
+			s.metrics.RecordRequest(req.Model, c.Provider.Name(), "error", durationMs)
+		}
+		slog.Warn("provider embeddings error, trying next", "model", req.Model, "provider", c.Provider.Name(), "error", err)
+		lastErr = err
+		var rl *provider.RateLimitError
+		if errors.As(err, &rl) {
+			if rl.RetryAfter > maxRetryAfter {
+				maxRetryAfter = rl.RetryAfter
+			}
+		} else {
+			allRateLimited = false
+		}
+	}
+	if lastErr != nil {
+		if r.Context().Err() != nil {
+			auditClientDisconnect(s.auditLogger, r.Context(), req.Model, start)
+			w.WriteHeader(499) // Nginx convention: Client Closed Request
+			return
+		}
+		slog.Error("all providers failed", "model", req.Model, "error", lastErr)
+		auditEmbeddings(s.auditLogger, r.Context(), req, nil, lastErr, start)
+		if allRateLimited {
+			w.Header().Set("Retry-After", strconv.Itoa(int(maxRetryAfter.Seconds())))
+			writeError(w, http.StatusTooManyRequests, "rate_limit_exceeded", fmt.Sprintf("all providers are rate limited, retry after %s", maxRetryAfter.Round(time.Second)))
+			return
+		}
+		if errors.Is(lastErr, provider.ErrQueueFull) {
+			writeError(w, http.StatusServiceUnavailable, "provider_busy", "all providers are at capacity, retry later")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("all providers failed: %v", lastErr))
+		return
+	}
+	auditEmbeddings(s.auditLogger, r.Context(), req, &resp, nil, start)
+
+	out, err := translator.EmbedResponseToOpenAI(resp, req.EncodingFormat)
+	if err != nil {
+		slog.Error("failed to encode embeddings response", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode response")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(out)
 }
 
 // handleModels handles GET /v1/models.

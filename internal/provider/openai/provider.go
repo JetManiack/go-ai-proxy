@@ -137,7 +137,7 @@ func (p *Provider) Chat(ctx context.Context, req domain.Request) (domain.Respons
 		return domain.Response{}, &provider.RateLimitError{RetryAfter: retryAfter}
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		return domain.Response{}, fmt.Errorf("openai: upstream returned %d: %s", httpResp.StatusCode, respBody)
+		return domain.Response{}, &provider.UpstreamError{StatusCode: httpResp.StatusCode, Body: string(respBody)}
 	}
 
 	return translator.ResponseFromOpenAI(respBody)
@@ -217,7 +217,7 @@ func (p *Provider) ChatStream(ctx context.Context, req domain.Request) (<-chan d
 		if httpResp.StatusCode == http.StatusTooManyRequests {
 			return nil, &provider.RateLimitError{RetryAfter: provider.ParseRetryAfter(retryAfterHdr)}
 		}
-		return nil, fmt.Errorf("openai: upstream returned %d: %s", httpResp.StatusCode, b)
+		return nil, &provider.UpstreamError{StatusCode: httpResp.StatusCode, Body: string(b)}
 	}
 
 	ch := make(chan domain.Chunk)

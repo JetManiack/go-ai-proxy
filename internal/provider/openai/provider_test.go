@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,8 +116,41 @@ func TestChat_UpstreamError(t *testing.T) {
 		Model:    "m",
 		Messages: []domain.Message{{Role: "user", Content: "hi"}},
 	})
-	if err == nil {
-		t.Error("expected error for 500 response")
+	var ue *provider.UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *provider.UpstreamError, got %T: %v", err, err)
+	}
+	if ue.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode: got %d, want 500", ue.StatusCode)
+	}
+	if !strings.Contains(ue.Body, "boom") {
+		t.Errorf("Body should contain upstream message, got %q", ue.Body)
+	}
+}
+
+// TestChat_UpstreamClientError_PreservesStatusAndBody verifies that a 4xx
+// upstream response is captured verbatim, so the server can proxy it to the
+// client instead of collapsing it into a generic 502.
+func TestChat_UpstreamClientError_PreservesStatusAndBody(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"invalid request: unknown field 'foo'"}}`))
+	})
+
+	p := openai.New(srv.URL)
+	_, err := p.Chat(context.Background(), domain.Request{
+		Model:    "m",
+		Messages: []domain.Message{{Role: "user", Content: "hi"}},
+	})
+	var ue *provider.UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *provider.UpstreamError, got %T: %v", err, err)
+	}
+	if ue.StatusCode != http.StatusBadRequest {
+		t.Errorf("StatusCode: got %d, want 400", ue.StatusCode)
+	}
+	if !strings.Contains(ue.Body, "unknown field") {
+		t.Errorf("Body should preserve upstream message verbatim, got %q", ue.Body)
 	}
 }
 
@@ -188,6 +222,29 @@ func TestChatStream_ReturnsChannel(t *testing.T) {
 	}
 	if ch == nil {
 		t.Error("expected non-nil channel")
+	}
+}
+
+// TestChatStream_UpstreamError verifies ChatStream's non-200/429 error path
+// (only its 429 path had coverage before) returns *provider.UpstreamError,
+// same as Chat.
+func TestChatStream_UpstreamError(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":{"message":"boom"}}`))
+	})
+
+	p := openai.New(srv.URL)
+	_, err := p.ChatStream(context.Background(), domain.Request{
+		Model:    "m",
+		Messages: []domain.Message{{Role: "user", Content: "hi"}},
+	})
+	var ue *provider.UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *provider.UpstreamError, got %T: %v", err, err)
+	}
+	if ue.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode: got %d, want 500", ue.StatusCode)
 	}
 }
 

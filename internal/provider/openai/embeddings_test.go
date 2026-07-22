@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,8 +89,39 @@ func TestEmbeddings_UpstreamError(t *testing.T) {
 
 	p := openai.New(srv.URL)
 	_, err := p.Embeddings(context.Background(), domain.EmbedRequest{Model: "m", Input: []string{"hi"}})
-	if err == nil {
-		t.Error("expected error for 500 response")
+	var ue *provider.UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *provider.UpstreamError, got %T: %v", err, err)
+	}
+	if ue.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode: got %d, want 500", ue.StatusCode)
+	}
+	if !strings.Contains(ue.Body, "boom") {
+		t.Errorf("Body should contain upstream message, got %q", ue.Body)
+	}
+}
+
+// TestEmbeddings_UpstreamClientError_PreservesStatusAndBody verifies that a
+// 4xx upstream response (e.g. an embeddings backend rejecting an input that
+// exceeds its token limit) is captured verbatim, so the server can proxy it
+// to the client instead of collapsing it into a generic 502.
+func TestEmbeddings_UpstreamClientError_PreservesStatusAndBody(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"input exceeds model's maximum context length of 2048 tokens"}}`))
+	})
+
+	p := openai.New(srv.URL)
+	_, err := p.Embeddings(context.Background(), domain.EmbedRequest{Model: "m", Input: []string{"hi"}})
+	var ue *provider.UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *provider.UpstreamError, got %T: %v", err, err)
+	}
+	if ue.StatusCode != http.StatusBadRequest {
+		t.Errorf("StatusCode: got %d, want 400", ue.StatusCode)
+	}
+	if !strings.Contains(ue.Body, "maximum context length") {
+		t.Errorf("Body should preserve upstream message verbatim, got %q", ue.Body)
 	}
 }
 

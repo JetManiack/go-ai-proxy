@@ -175,7 +175,7 @@ func (p *Provider) Embeddings(ctx context.Context, req domain.EmbedRequest) (dom
 		return domain.EmbedResponse{}, &provider.RateLimitError{RetryAfter: retryAfter}
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		return domain.EmbedResponse{}, fmt.Errorf("openai: upstream returned %d: %s", httpResp.StatusCode, respBody)
+		return domain.EmbedResponse{}, &provider.UpstreamError{StatusCode: httpResp.StatusCode, Body: string(respBody)}
 	}
 
 	return translator.EmbedResponseFromOpenAI(respBody)

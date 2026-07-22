@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,5 +221,52 @@ func TestEmbeddings_Base64EncodingFormat(t *testing.T) {
 	data := body["data"].([]any)
 	if _, ok := data[0].(map[string]any)["embedding"].(string); !ok {
 		t.Errorf("embedding: got %T %v, want base64 string", data[0].(map[string]any)["embedding"], data[0])
+	}
+}
+
+// TestEmbeddings_UpstreamClientError_ProxiedVerbatim verifies that when the
+// upstream embeddings backend rejects a request with a 4xx (e.g. input
+// exceeds the model's token limit), gap proxies that exact status code and
+// message to the client instead of collapsing it into a generic 502 — gap
+// has no tokenizer to pre-validate input length itself.
+func TestEmbeddings_UpstreamClientError_ProxiedVerbatim(t *testing.T) {
+	fp := testutil.NewFakeProvider(domain.Model{ID: "m"})
+	fp.EmbedFunc = func(_ context.Context, _ domain.EmbedRequest) (domain.EmbedResponse, error) {
+		return domain.EmbedResponse{}, &provider.UpstreamError{
+			StatusCode: http.StatusBadRequest,
+			Body:       `{"error":{"message":"input exceeds model's maximum context length of 2048 tokens"}}`,
+		}
+	}
+	srv := newTestServer(t, fp)
+	defer srv.Close()
+
+	resp := embedRequest(t, srv, map[string]any{"model": "m", "input": "a very long chunk"})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400 (proxied verbatim from upstream)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "maximum context length") {
+		t.Errorf("body should contain upstream message, got %s", body)
+	}
+}
+
+// TestEmbeddings_Upstream5xx_StillMapsTo502 is a regression guard: an
+// upstream infra failure (5xx) should still collapse to gap's own 502
+// framing, not be proxied verbatim like a 4xx.
+func TestEmbeddings_Upstream5xx_StillMapsTo502(t *testing.T) {
+	fp := testutil.NewFakeProvider(domain.Model{ID: "m"})
+	fp.EmbedFunc = func(_ context.Context, _ domain.EmbedRequest) (domain.EmbedResponse, error) {
+		return domain.EmbedResponse{}, &provider.UpstreamError{StatusCode: http.StatusInternalServerError, Body: "boom"}
+	}
+	srv := newTestServer(t, fp)
+	defer srv.Close()
+
+	resp := embedRequest(t, srv, map[string]any{"model": "m", "input": "hi"})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status: got %d, want 502", resp.StatusCode)
 	}
 }

@@ -450,6 +450,17 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "provider_busy", "all providers are at capacity, retry later")
 			return
 		}
+		// A 4xx from the upstream embeddings backend (e.g. input exceeds its
+		// token limit) is proxied verbatim — gap has no tokenizer to validate
+		// input length itself, so the upstream's own rejection is the most
+		// accurate signal the client can get. A 5xx still collapses to gap's
+		// own 502 framing below, since that's an infra failure, not a
+		// client-caused request problem.
+		var ue *provider.UpstreamError
+		if errors.As(lastErr, &ue) && ue.StatusCode >= 400 && ue.StatusCode < 500 {
+			writeError(w, ue.StatusCode, "provider_error", ue.Body)
+			return
+		}
 		writeError(w, http.StatusBadGateway, "upstream_error", fmt.Sprintf("all providers failed: %v", lastErr))
 		return
 	}

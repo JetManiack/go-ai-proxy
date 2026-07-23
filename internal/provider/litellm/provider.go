@@ -96,6 +96,11 @@ func (p *Provider) ChatStream(ctx context.Context, req domain.Request) (<-chan d
 	return p.inner.ChatStream(ctx, req)
 }
 
+// Embeddings delegates to the inner OpenAI-compatible provider.
+func (p *Provider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	return p.inner.Embeddings(ctx, req)
+}
+
 // Models fetches the model list and enriches it with capability metadata from /model/info.
 // If /model/info is unavailable (e.g. non-LiteLLM server), capabilities are omitted silently.
 func (p *Provider) Models(ctx context.Context) ([]domain.Model, error) {

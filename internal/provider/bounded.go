@@ -238,3 +238,37 @@ func (p *BoundedProvider) ChatStream(ctx context.Context, req domain.Request) (<
 func (p *BoundedProvider) Models(ctx context.Context) ([]domain.Model, error) {
 	return p.inner.Models(ctx)
 }
+
+// Embeddings applies the same concurrency/queue/rate-limit-cooldown/timeout
+// semantics as Chat, delegating to the inner provider if it supports
+// embeddings. *BoundedProvider always satisfies domain.EmbeddingsProvider so
+// callers can type-assert regardless of whether a provider ended up
+// bounded — it fails clearly here instead if the wrapped provider doesn't
+// implement it (e.g. a bounded Anthropic provider).
+func (p *BoundedProvider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	ep, ok := p.inner.(domain.EmbeddingsProvider)
+	if !ok {
+		return domain.EmbedResponse{}, fmt.Errorf("%s: embeddings not supported", p.inner.Name())
+	}
+
+	if remaining, cooling := p.cooling(); cooling {
+		return domain.EmbedResponse{}, &RateLimitError{RetryAfter: remaining}
+	}
+	if err := p.acquire(ctx); err != nil {
+		return domain.EmbedResponse{}, err
+	}
+	defer p.release()
+
+	callCtx := ctx
+	if p.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, p.requestTimeout)
+		defer cancel()
+	}
+	resp, err := ep.Embeddings(callCtx, req)
+	if err != nil {
+		p.setCooldown(err)
+		return domain.EmbedResponse{}, err
+	}
+	return resp, nil
+}

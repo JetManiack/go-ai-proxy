@@ -258,6 +258,93 @@ providers:
 
 ---
 
+## Embeddings
+
+`POST /v1/embeddings` works exactly like `/v1/chat/completions`: same model
+routing, same fallback/rate-limit/queue-full handling, same OpenAI wire format
+(`input` as a string or array of strings; `encoding_format: "float" | "base64"`;
+optional `dimensions`). There is no streaming variant.
+
+Embedding models are tagged with the `"embeddings"` capability, the same way
+`vision`/`reasoning` are tagged today — either automatically (LM Studio's
+native `/api/v1/models` reports embedding-type models, and `gap` tags them
+`["embeddings"]`) or manually via `model_capabilities`:
+
+```yaml
+providers:
+  - name: openai
+    type: openai
+    base_url: "https://api.openai.com"
+    auth:
+      method: api_key
+      api_key: "${OPENAI_API_KEY}"
+    model_capabilities:
+      "text-embedding-3-small": ["embeddings"]
+```
+
+This makes `auto:embeddings` work like any other capability selector. **Anthropic
+has no native embeddings API** (Voyage AI is Anthropic's ecosystem answer, not
+wired up here) — a request routed to a bounded Anthropic provider simply falls
+through to the next candidate.
+
+### Per-model token limits
+
+Many embedding models cap input at a fixed size (commonly 512, 2048, or
+8192 tokens — it varies by model). `gap` does not tokenize or validate input
+length itself — that would need a per-model tokenizer, which isn't generically
+available. Instead:
+
+- The limit is surfaced to clients via `max_model_len` in `GET /v1/models`
+  (the same field already used for chat context windows), populated
+  automatically when the upstream reports it, or overridden manually with
+  `model_context_length` in the provider's config — it applies to embedding
+  models exactly like chat models:
+
+  ```yaml
+  model_context_length:
+    "nomic-embed-text-v1.5": 2048
+  ```
+
+- If a client sends an oversized chunk anyway, the upstream backend rejects
+  it (typically `400`), and `gap` proxies that rejection verbatim — same
+  status code, same message — rather than folding it into a generic `502`.
+  This isn't embeddings-specific — see [Error handling](#error-handling) below,
+  which applies the same rule to `/v1/chat/completions`.
+
+---
+
+## Error handling
+
+When every candidate provider for a request fails, `gap` maps the last
+failure to a client response:
+
+- **Rate limits** (`429` from upstream) are tracked separately per provider
+  (with a cooldown) and, if every candidate is rate-limited, the client gets
+  `429` with `Retry-After`.
+- **Queue full** (`max_concurrent`/`queue_size` exhausted) → `503 provider_busy`.
+- **A `4xx` from the upstream itself** (not rate-limited) is proxied to the
+  client verbatim — same status code, same body, `type: "provider_error"` —
+  for both `/v1/chat/completions` and `/v1/embeddings`. `gap` doesn't validate
+  request content itself (no tokenizer, no schema re-validation), so the
+  upstream's own rejection (bad input, unsupported parameter, oversized chunk,
+  ...) is the most accurate signal the client can get.
+- **A `5xx` from upstream, or an untyped/network error**, still collapses to
+  `gap`'s own `502 upstream_error` — that's an infra failure, not something
+  caused by the client's request.
+- A client disconnecting before any candidate responds is logged as an
+  `event: "client_disconnect"` INFO record, not an error, and the connection
+  is closed with `499` (no response body — the client is already gone).
+
+This is implemented once (`writeProviderFailure` in `internal/server/server.go`)
+and shared by all three request-handling paths (non-streaming chat, streaming
+chat, embeddings) — a candidate's error either carries a typed
+`*provider.UpstreamError{StatusCode, Body}` (set by `openai.Provider`'s
+`Chat`/`ChatStream`/`Embeddings` for any non-200/429 upstream response) or it
+doesn't, and the mapping above applies identically regardless of which
+endpoint triggered it.
+
+---
+
 ## Thinking / chain-of-thought
 
 `gap` transparently extracts extended thinking content from providers that support

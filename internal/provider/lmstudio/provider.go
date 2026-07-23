@@ -88,6 +88,11 @@ func (p *Provider) ChatStream(ctx context.Context, req domain.Request) (<-chan d
 	return p.inner.ChatStream(ctx, req)
 }
 
+// Embeddings delegates to the inner OpenAI-compatible provider.
+func (p *Provider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	return p.inner.Embeddings(ctx, req)
+}
+
 // Models fetches model metadata from LM Studio's native /api/v1/models endpoint
 // and maps capabilities automatically. Falls back to /v1/models without capabilities
 // if the native endpoint is unavailable (older LM Studio versions).
@@ -150,14 +155,20 @@ func (p *Provider) fetchNativeModels(ctx context.Context) ([]domain.Model, error
 
 	var models []domain.Model
 	for _, m := range native.Models {
-		if m.Type != "llm" {
-			continue
+		switch m.Type {
+		case "llm":
+			models = append(models, domain.Model{
+				ID:           m.Key,
+				OwnedBy:      "lmstudio",
+				Capabilities: mapCapabilities(m.Capabilities),
+			})
+		case "embedding":
+			models = append(models, domain.Model{
+				ID:           m.Key,
+				OwnedBy:      "lmstudio",
+				Capabilities: []string{"embeddings"},
+			})
 		}
-		models = append(models, domain.Model{
-			ID:           m.Key,
-			OwnedBy:      "lmstudio",
-			Capabilities: mapCapabilities(m.Capabilities),
-		})
 	}
 	return models, nil
 }

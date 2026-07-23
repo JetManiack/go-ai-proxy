@@ -104,3 +104,32 @@ type Provider interface {
 	ChatStream(ctx context.Context, req Request) (<-chan Chunk, error)
 	Models(ctx context.Context) ([]Model, error)
 }
+
+// EmbedRequest is the provider-agnostic embeddings request.
+type EmbedRequest struct {
+	Model          string
+	Input          []string // normalized from wire string|[]string
+	EncodingFormat string   // "float" (default) | "base64" — the caller's requested output shape
+	Dimensions     *int     // optional; only forwarded upstream when set
+}
+
+// Embedding is a single input's embedding vector, in request order.
+type Embedding struct {
+	Index  int
+	Values []float64
+}
+
+// EmbedResponse is the provider-agnostic embeddings response.
+type EmbedResponse struct {
+	Model      string
+	Embeddings []Embedding
+	Usage      Usage // CompletionTokens always 0
+}
+
+// EmbeddingsProvider is an optional capability a Provider may implement.
+// Not every provider supports embeddings (e.g. Anthropic has no native
+// embeddings API), so this is deliberately separate from Provider rather
+// than a required method — callers must type-assert to discover support.
+type EmbeddingsProvider interface {
+	Embeddings(ctx context.Context, req EmbedRequest) (EmbedResponse, error)
+}

@@ -66,6 +66,12 @@ func (p *Provider) ChatStream(ctx context.Context, req domain.Request) (<-chan d
 	return p.inner.ChatStream(ctx, req)
 }
 
+// Embeddings delegates to the inner openai provider. The grammar mutator is
+// not invoked — structured output has no meaning for embeddings.
+func (p *Provider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	return p.inner.Embeddings(ctx, req)
+}
+
 // Models returns upstream models, attaching configured capabilities.
 func (p *Provider) Models(ctx context.Context) ([]domain.Model, error) {
 	models, err := p.inner.Models(ctx)

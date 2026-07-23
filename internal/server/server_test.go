@@ -459,6 +459,89 @@ func TestFallback_AllProvidersFail_Returns502(t *testing.T) {
 	}
 }
 
+// TestChatCompletions_UpstreamClientError_ProxiedVerbatim verifies that when
+// the upstream chat backend rejects a request with a 4xx, gap proxies that
+// exact status and message to the client instead of collapsing it into a
+// generic 502 — same policy already shipped for /v1/embeddings.
+func TestChatCompletions_UpstreamClientError_ProxiedVerbatim(t *testing.T) {
+	fp := testutil.NewFakeProvider(domain.Model{ID: "m"})
+	fp.ChatFunc = func(_ context.Context, _ domain.Request) (domain.Response, error) {
+		return domain.Response{}, &provider.UpstreamError{
+			StatusCode: http.StatusBadRequest,
+			Body:       `{"error":{"message":"invalid request: unknown field 'foo'"}}`,
+		}
+	}
+	srv := newTestServer(t, fp)
+	defer srv.Close()
+
+	resp := chatRequest(t, srv, map[string]any{
+		"model":    "m",
+		"messages": []map[string]any{{"role": "user", "content": "hi"}},
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400 (proxied verbatim from upstream)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "unknown field") {
+		t.Errorf("body should contain upstream message, got %s", body)
+	}
+}
+
+// TestChatCompletions_Upstream5xx_StillMapsTo502 is a regression guard: an
+// upstream infra failure (5xx) should still collapse to gap's own 502
+// framing, not be proxied verbatim like a 4xx.
+func TestChatCompletions_Upstream5xx_StillMapsTo502(t *testing.T) {
+	fp := testutil.NewFakeProvider(domain.Model{ID: "m"})
+	fp.ChatFunc = func(_ context.Context, _ domain.Request) (domain.Response, error) {
+		return domain.Response{}, &provider.UpstreamError{StatusCode: http.StatusInternalServerError, Body: "boom"}
+	}
+	srv := newTestServer(t, fp)
+	defer srv.Close()
+
+	resp := chatRequest(t, srv, map[string]any{
+		"model":    "m",
+		"messages": []map[string]any{{"role": "user", "content": "hi"}},
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status: got %d, want 502", resp.StatusCode)
+	}
+}
+
+// TestChatStream_UpstreamClientError_ProxiedVerbatim verifies the same 4xx
+// proxying for the streaming path — the failure happens before any SSE
+// headers are committed, so it's a plain JSON error response like the
+// non-streaming case.
+func TestChatStream_UpstreamClientError_ProxiedVerbatim(t *testing.T) {
+	fp := testutil.NewFakeProvider(domain.Model{ID: "m"})
+	fp.StreamFunc = func(_ context.Context, _ domain.Request) (<-chan domain.Chunk, error) {
+		return nil, &provider.UpstreamError{
+			StatusCode: http.StatusBadRequest,
+			Body:       `{"error":{"message":"invalid request: unknown field 'foo'"}}`,
+		}
+	}
+	srv := newTestServer(t, fp)
+	defer srv.Close()
+
+	resp := chatRequest(t, srv, map[string]any{
+		"model":    "m",
+		"messages": []map[string]any{{"role": "user", "content": "hi"}},
+		"stream":   true,
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400 (proxied verbatim from upstream)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "unknown field") {
+		t.Errorf("body should contain upstream message, got %s", body)
+	}
+}
+
 func TestFallback_Stream_SecondProviderUsedOnError(t *testing.T) {
 	primary := testutil.NewFakeProvider(domain.Model{ID: "m"})
 	primary.StreamFunc = func(_ context.Context, _ domain.Request) (<-chan domain.Chunk, error) {

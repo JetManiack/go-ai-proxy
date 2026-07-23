@@ -63,6 +63,47 @@ func auditChat(
 	logger.InfoContext(ctx, "audit", args...)
 }
 
+// auditEmbeddings logs a completed embeddings request.
+// INFO: metadata (model, request_id, duration, input_count, tokens/error).
+// DEBUG: the input strings themselves.
+// logger nil = disabled.
+func auditEmbeddings(
+	logger *slog.Logger,
+	ctx context.Context,
+	req domain.EmbedRequest,
+	resp *domain.EmbedResponse,
+	err error,
+	start time.Time,
+) {
+	if logger == nil {
+		return
+	}
+
+	if logger.Enabled(ctx, slog.LevelDebug) {
+		logger.DebugContext(ctx, "audit",
+			"request_id", requestIDFromContext(ctx),
+			"model", req.Model,
+			"input", req.Input,
+		)
+	}
+
+	args := []any{
+		"request_id", requestIDFromContext(ctx),
+		"model", req.Model,
+		"input_count", len(req.Input),
+		"duration_ms", time.Since(start).Milliseconds(),
+	}
+	if err != nil {
+		args = append(args, "error", err.Error())
+		logger.ErrorContext(ctx, "audit", args...)
+		return
+	}
+	if resp != nil {
+		args = append(args, "prompt_tokens", resp.Usage.PromptTokens)
+	}
+	logger.InfoContext(ctx, "audit", args...)
+}
+
 // auditStreamStart logs the moment a streaming response begins (headers flushed).
 // INFO: model + request_id.
 // DEBUG: full prompt messages.

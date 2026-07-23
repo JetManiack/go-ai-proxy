@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/JetManiack/go-ai-proxy/internal/domain"
 	"github.com/JetManiack/go-ai-proxy/internal/provider/lmstudio"
 )
 
@@ -95,7 +96,7 @@ func TestModels_MapsReasoningCapability(t *testing.T) {
 	}
 }
 
-func TestModels_FiltersEmbeddingModels(t *testing.T) {
+func TestModels_TagsEmbeddingModelsWithCapability(t *testing.T) {
 	srv := newFakeServer(t,
 		map[string]any{"models": []any{
 			nativeModel("llm-model", false, false),
@@ -108,8 +109,21 @@ func TestModels_FiltersEmbeddingModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
-	if len(models) != 1 || models[0].ID != "llm-model" {
-		t.Errorf("expected only llm-model, got %v", models)
+	if len(models) != 2 {
+		t.Fatalf("expected both llm-model and embed-model, got %v", models)
+	}
+
+	var embedModel *domain.Model
+	for i := range models {
+		if models[i].ID == "embed-model" {
+			embedModel = &models[i]
+		}
+	}
+	if embedModel == nil {
+		t.Fatalf("embed-model missing from results: %v", models)
+	}
+	if len(embedModel.Capabilities) != 1 || embedModel.Capabilities[0] != "embeddings" {
+		t.Errorf("embed-model capabilities: got %v, want [\"embeddings\"]", embedModel.Capabilities)
 	}
 }
 

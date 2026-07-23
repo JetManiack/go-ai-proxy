@@ -6,12 +6,16 @@ import (
 	"github.com/JetManiack/go-ai-proxy/internal/domain"
 )
 
-// FakeProvider is a configurable test double for domain.Provider.
+// FakeProvider is a configurable test double for domain.Provider. It also
+// implements domain.EmbeddingsProvider (via EmbedFunc) — use a type that
+// doesn't embed FakeProvider when a test needs a provider that does *not*
+// support embeddings.
 type FakeProvider struct {
 	NameVal    string
 	ChatFunc   func(ctx context.Context, req domain.Request) (domain.Response, error)
 	StreamFunc func(ctx context.Context, req domain.Request) (<-chan domain.Chunk, error)
 	ModelsFunc func(ctx context.Context) ([]domain.Model, error)
+	EmbedFunc  func(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error)
 }
 
 func (f *FakeProvider) Name() string {
@@ -43,6 +47,16 @@ func (f *FakeProvider) Models(ctx context.Context) ([]domain.Model, error) {
 		return f.ModelsFunc(ctx)
 	}
 	return nil, nil
+}
+
+func (f *FakeProvider) Embeddings(ctx context.Context, req domain.EmbedRequest) (domain.EmbedResponse, error) {
+	if f.EmbedFunc != nil {
+		return f.EmbedFunc(ctx, req)
+	}
+	return domain.EmbedResponse{
+		Model:      req.Model,
+		Embeddings: []domain.Embedding{{Index: 0, Values: []float64{0.1, 0.2, 0.3}}},
+	}, nil
 }
 
 // NewFakeProvider returns a FakeProvider that serves the given models.
